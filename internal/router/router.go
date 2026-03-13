@@ -6,7 +6,10 @@ import (
 	"github.com/peshk1n/site-monitor/internal/handler"
 )
 
-func NewRouter(monitorHandler *handler.MonitorHandler) *chi.Mux {
+func NewRouter(
+	monitorHandler *handler.MonitorHandler,
+	checkHandler *handler.CheckHandler,
+) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -15,6 +18,9 @@ func NewRouter(monitorHandler *handler.MonitorHandler) *chi.Mux {
 		r.Post("/", monitorHandler.Create)
 		r.Get("/{id}", monitorHandler.GetByID)
 		r.Delete("/{id}", monitorHandler.Delete)
+
+		r.Get("/{id}/checks", checkHandler.GetByMonitorID)
+		r.Get("/{id}/checks/last", checkHandler.GetLastByMonitorID)
 	})
 	return r
 }
