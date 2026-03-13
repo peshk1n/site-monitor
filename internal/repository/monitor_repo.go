@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"database/sql"
+
 	"github.com/jmoiron/sqlx"
 	"github.com/peshk1n/site-monitor/internal/models"
 )
@@ -47,6 +49,19 @@ func (r *MonitorRepository) Create(monitor *models.Monitor) error {
 
 // удаляет монитор по ID
 func (r *MonitorRepository) Delete(id int) error {
-	_, err := r.db.Exec("DELETE FROM monitors WHERE id = $1", id)
-	return err
+	result, err := r.db.Exec("DELETE FROM monitors WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }
