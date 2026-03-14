@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,20 +10,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/peshk1n/site-monitor/internal/dto"
 	"github.com/peshk1n/site-monitor/internal/models"
-	"github.com/peshk1n/site-monitor/internal/repository"
+	"github.com/peshk1n/site-monitor/internal/service"
 )
 
 type MonitorHandler struct {
-	monitorRepo *repository.MonitorRepository
+	monitorService *service.MonitorService
 }
 
-func NewMonitorHandler(monitorRepo *repository.MonitorRepository) *MonitorHandler {
-	return &MonitorHandler{monitorRepo: monitorRepo}
+func NewMonitorHandler(monitorService *service.MonitorService) *MonitorHandler {
+	return &MonitorHandler{
+		monitorService: monitorService,
+	}
 }
 
-// обрабатывает GET /monitors
+// GET /monitors
 func (h *MonitorHandler) GetAll(w http.ResponseWriter, r *http.Request) {
-	monitors, err := h.monitorRepo.GetAll()
+	monitors, err := h.monitorService.GetAll()
 	if err != nil {
 		http.Error(w, "Failed to fetch monitors", http.StatusInternalServerError)
 		return
@@ -32,6 +34,7 @@ func (h *MonitorHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	response := dto.MonitorListResponse{
 		Monitors: make([]dto.MonitorResponse, 0, len(monitors)),
 	}
+
 	for _, m := range monitors {
 		response.Monitors = append(response.Monitors, toMonitorResponse(m))
 	}
@@ -39,7 +42,7 @@ func (h *MonitorHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, response)
 }
 
-// обрабатывает GET /monitors/{id}
+// GET /monitors/{id}
 func (h *MonitorHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -47,12 +50,12 @@ func (h *MonitorHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	monitor, err := h.monitorRepo.GetByID(id)
-	if err == sql.ErrNoRows {
-		http.Error(w, "Monitor not found", http.StatusNotFound)
-		return
-	}
+	monitor, err := h.monitorService.GetByID(id)
 	if err != nil {
+		if errors.Is(err, service.ErrMonitorNotFound) {
+			http.Error(w, "Monitor not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -60,7 +63,7 @@ func (h *MonitorHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, toMonitorResponse(*monitor))
 }
 
-// обрабатывает POST /monitors
+// POST /monitors
 func (h *MonitorHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
@@ -70,26 +73,16 @@ func (h *MonitorHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.URL == "" {
-		http.Error(w, "URL is required", http.StatusBadRequest)
-		return
-	}
-
-	monitor := &models.Monitor{
-		URL:      req.URL,
-		Interval: req.Interval,
-		Timeout:  req.Timeout,
-		IsActive: true,
-	}
-
-	if monitor.Interval == 0 {
-		monitor.Interval = 60
-	}
-	if monitor.Timeout == 0 {
-		monitor.Timeout = 10
-	}
-
-	if err := h.monitorRepo.Create(monitor); err != nil {
+	monitor, err := h.monitorService.Create(
+		req.URL,
+		req.Interval,
+		req.Timeout,
+	)
+	if err != nil {
+		if errors.Is(err, service.ErrURLRequired) {
+			http.Error(w, "URL is required", http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "Failed to create monitor", http.StatusInternalServerError)
 		return
 	}
@@ -97,7 +90,7 @@ func (h *MonitorHandler) Create(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, toMonitorResponse(*monitor))
 }
 
-// обрабатывает DELETE /monitors/{id}
+// DELETE /monitors/{id}
 func (h *MonitorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -105,12 +98,12 @@ func (h *MonitorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.monitorRepo.Delete(id); err != nil {
-		if err == sql.ErrNoRows {
+	err = h.monitorService.Delete(id)
+	if err != nil {
+		if errors.Is(err, service.ErrMonitorNotFound) {
 			http.Error(w, "Monitor not found", http.StatusNotFound)
 			return
 		}
-
 		http.Error(w, "Failed to delete monitor", http.StatusInternalServerError)
 		return
 	}
@@ -129,7 +122,6 @@ func toMonitorResponse(m models.Monitor) dto.MonitorResponse {
 	}
 }
 
-// превращает структуру в JSON и отправляет клиенту
 func respondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

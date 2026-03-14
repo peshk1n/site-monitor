@@ -13,6 +13,7 @@ func NewRouter(
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.StripSlashes)
 	r.Route("/api/v1/monitors", func(r chi.Router) {
 		r.Get("/", monitorHandler.GetAll)
 		r.Post("/", monitorHandler.Create)

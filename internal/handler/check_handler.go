@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -9,25 +9,20 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/peshk1n/site-monitor/internal/dto"
 	"github.com/peshk1n/site-monitor/internal/models"
-	"github.com/peshk1n/site-monitor/internal/repository"
+	"github.com/peshk1n/site-monitor/internal/service"
 )
 
 type CheckHandler struct {
-	checkRepo   *repository.CheckRepository
-	monitorRepo *repository.MonitorRepository
+	checkService *service.CheckService
 }
 
-func NewCheckHandler(
-	checkRepo *repository.CheckRepository,
-	monitorRepo *repository.MonitorRepository,
-) *CheckHandler {
+func NewCheckHandler(checkService *service.CheckService) *CheckHandler {
 	return &CheckHandler{
-		checkRepo:   checkRepo,
-		monitorRepo: monitorRepo,
+		checkService: checkService,
 	}
 }
 
-// обрабатывает GET /monitors/{id}/checks
+// GET /monitors/{id}/checks
 func (h *CheckHandler) GetByMonitorID(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -35,18 +30,12 @@ func (h *CheckHandler) GetByMonitorID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.monitorRepo.GetByID(id)
-	if err == sql.ErrNoRows {
-		http.Error(w, "Monitor not found", http.StatusNotFound)
-		return
-	}
+	checks, err := h.checkService.GetByMonitorID(id)
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	checks, err := h.checkRepo.GetByMonitorID(id)
-	if err != nil {
+		if errors.Is(err, service.ErrMonitorNotFound) {
+			http.Error(w, "Monitor not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Failed to fetch checks", http.StatusInternalServerError)
 		return
 	}
@@ -54,6 +43,7 @@ func (h *CheckHandler) GetByMonitorID(w http.ResponseWriter, r *http.Request) {
 	response := dto.CheckListResponse{
 		Checks: make([]dto.CheckResponse, 0, len(checks)),
 	}
+
 	for _, c := range checks {
 		response.Checks = append(response.Checks, toCheckResponse(c))
 	}
@@ -61,7 +51,7 @@ func (h *CheckHandler) GetByMonitorID(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, response)
 }
 
-// возвращает последнюю проверку для монитора GET /monitors/{id}/checks/last
+// GET /monitors/{id}/checks/last
 func (h *CheckHandler) GetLastByMonitorID(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -69,22 +59,16 @@ func (h *CheckHandler) GetLastByMonitorID(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	_, err = h.monitorRepo.GetByID(id)
-	if err == sql.ErrNoRows {
-		http.Error(w, "Monitor not found", http.StatusNotFound)
-		return
-	}
+	check, err := h.checkService.GetLastByMonitorID(id)
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	check, err := h.checkRepo.GetLastCheck(id)
-	if err == sql.ErrNoRows {
-		http.Error(w, "No checks found", http.StatusNotFound)
-		return
-	}
-	if err != nil {
+		if errors.Is(err, service.ErrMonitorNotFound) {
+			http.Error(w, "Monitor not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, service.ErrNoChecksFound) {
+			http.Error(w, "No checks found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Failed to fetch last check", http.StatusInternalServerError)
 		return
 	}
