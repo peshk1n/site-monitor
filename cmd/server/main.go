@@ -28,10 +28,12 @@ func main() {
 	checkService := service.NewCheckService(checkRepo, monitorRepo)
 	monitorHandler := handler.NewMonitorHandler(monitorService)
 	checkHandler := handler.NewCheckHandler(checkService)
+	notifier := service.NewTelegramNotifier(cfg.TelegramToken, cfg.TelegramChatID)
+	s := scheduler.NewScheduler(monitorService, checkService, notifier)
+	s.Start()
+
 	r := router.NewRouter(monitorHandler, checkHandler)
 
-	s := scheduler.NewScheduler(monitorService, checkService)
-	s.Start()
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 

@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"sync"
@@ -13,16 +14,19 @@ import (
 type Scheduler struct {
 	monitorService *service.MonitorService
 	checkService   *service.CheckService
+	notifier       *service.TelegramNotifier
 	stopChan       chan struct{}
 }
 
 func NewScheduler(
 	monitorService *service.MonitorService,
 	checkService *service.CheckService,
+	notifier *service.TelegramNotifier,
 ) *Scheduler {
 	return &Scheduler{
 		monitorService: monitorService,
 		checkService:   checkService,
+		notifier:       notifier,
 		stopChan:       make(chan struct{}),
 	}
 }
@@ -65,35 +69,28 @@ func (s *Scheduler) runChecks() {
 	}
 
 	var wg sync.WaitGroup
-
 	for _, monitor := range monitors {
 		if !monitor.IsActive {
 			continue
 		}
 
 		wg.Add(1)
-
 		go func(m models.Monitor) {
 			defer wg.Done()
 			s.checkMonitor(m)
 		}(monitor)
 	}
-
 	wg.Wait()
-
 	log.Println("All checks completed")
 }
 
 func (s *Scheduler) checkMonitor(monitor models.Monitor) {
-
 	client := &http.Client{
 		Timeout: time.Duration(monitor.Timeout) * time.Second,
 	}
 
 	start := time.Now()
-
 	resp, err := client.Get(monitor.URL)
-
 	responseMs := int(time.Since(start).Milliseconds())
 
 	check := &models.Check{
@@ -102,39 +99,28 @@ func (s *Scheduler) checkMonitor(monitor models.Monitor) {
 	}
 
 	if err != nil {
-
 		check.IsUp = false
 		check.Error = err.Error()
-
 		log.Printf("%s is DOWN: %s\n", monitor.URL, err.Error())
-
 	} else {
-
 		defer resp.Body.Close()
-
 		check.StatusCode = resp.StatusCode
 		check.IsUp = resp.StatusCode < 400
-
 		if !check.IsUp {
-
 			check.Error = "HTTP " + http.StatusText(resp.StatusCode)
-
-			log.Printf("%s returned %d\n",
-				monitor.URL,
-				resp.StatusCode,
-			)
-
+			log.Printf("%s returned %d\n", monitor.URL, resp.StatusCode)
 		} else {
-
-			log.Printf("%s is UP (%d ms)\n",
-				monitor.URL,
-				responseMs,
-			)
-
+			log.Printf("%s is UP (%d ms)\n", monitor.URL, responseMs)
 		}
 	}
 
+	lastCheck, lastErr := s.checkService.GetLastByMonitorID(monitor.ID)
 	if err := s.checkService.Create(check); err != nil {
 		log.Println("Failed to save check result:", err)
+		return
+	}
+
+	if errors.Is(lastErr, service.ErrNoChecksFound) || lastCheck.IsUp != check.IsUp {
+		s.notifier.SendAlert(monitor.URL, check.IsUp, responseMs)
 	}
 }
