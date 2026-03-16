@@ -13,10 +13,10 @@ import (
 )
 
 type CheckHandler struct {
-	checkService *service.CheckService
+	checkService CheckService
 }
 
-func NewCheckHandler(checkService *service.CheckService) *CheckHandler {
+func NewCheckHandler(checkService CheckService) *CheckHandler {
 	return &CheckHandler{
 		checkService: checkService,
 	}

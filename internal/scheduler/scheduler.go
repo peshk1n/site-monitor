@@ -70,7 +70,6 @@ func (s *Scheduler) runChecks() {
 		wg.Add(1)
 		go func(m models.Monitor) {
 			defer wg.Done()
-			// Теперь вся логика внутри сервиса
 			if err := s.checkService.RunCheck(m); err != nil {
 				log.Println("Failed to check monitor:", err)
 			}

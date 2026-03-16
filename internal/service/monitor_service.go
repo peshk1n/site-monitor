@@ -6,14 +6,13 @@ import (
 	"database/sql"
 
 	"github.com/peshk1n/site-monitor/internal/models"
-	"github.com/peshk1n/site-monitor/internal/repository"
 )
 
 type MonitorService struct {
-	monitorRepo *repository.MonitorRepository
+	monitorRepo MonitorRepository
 }
 
-func NewMonitorService(monitorRepo *repository.MonitorRepository) *MonitorService {
+func NewMonitorService(monitorRepo MonitorRepository) *MonitorService {
 	return &MonitorService{
 		monitorRepo: monitorRepo,
 	}

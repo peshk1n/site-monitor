@@ -8,22 +8,17 @@ import (
 	"time"
 
 	"github.com/peshk1n/site-monitor/internal/models"
-	"github.com/peshk1n/site-monitor/internal/repository"
 )
 
-type Notifier interface {
-	SendAlert(siteURL string, isUp bool, responseMs int)
-}
-
 type CheckService struct {
-	checkRepo   *repository.CheckRepository
-	monitorRepo *repository.MonitorRepository
+	checkRepo   CheckRepository
+	monitorRepo MonitorRepository
 	notifier    Notifier
 }
 
 func NewCheckService(
-	checkRepo *repository.CheckRepository,
-	monitorRepo *repository.MonitorRepository,
+	checkRepo CheckRepository,
+	monitorRepo MonitorRepository,
 	notifier Notifier,
 ) *CheckService {
 	return &CheckService{
@@ -62,8 +57,8 @@ func (s *CheckService) RunCheck(monitor models.Monitor) error {
 		}
 	}
 
-	lastCheck, lastErr := s.GetLastByMonitorID(monitor.ID)
-	if err := s.Create(check); err != nil {
+	lastCheck, lastErr := s.checkRepo.GetLastCheck(monitor.ID)
+	if err := s.checkRepo.Create(check); err != nil {
 		return err
 	}
 
