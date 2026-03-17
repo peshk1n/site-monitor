@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -33,8 +34,16 @@ func (s *CheckService) RunCheck(monitor models.Monitor) error {
 		Timeout: time.Duration(monitor.Timeout) * time.Second,
 	}
 
+	req, err := http.NewRequest(http.MethodGet, monitor.URL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SiteMonitor/1.0)")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+
 	start := time.Now()
-	resp, err := client.Get(monitor.URL)
+	resp, err := client.Do(req)
 	responseMs := int(time.Since(start).Milliseconds())
 	check := &models.Check{
 		MonitorID:  monitor.ID,

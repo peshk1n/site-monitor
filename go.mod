@@ -7,4 +7,5 @@ require (
 	github.com/jmoiron/sqlx v1.4.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/lib/pq v1.11.2 // indirect
+	gopkg.in/telebot.v3 v3.3.8 // indirect
 )
