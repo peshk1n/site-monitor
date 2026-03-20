@@ -17,15 +17,40 @@ A website monitoring service that periodically checks the availability of websit
 - **chi** — HTTP router
 - **sqlx** — database access
 - **telebot v3** — Telegram bot
+- **Docker** — containerization
 
 ## Getting Started
 
-### Prerequisites
+### Running with Docker (recommended)
+
+1. Clone the repository:
+```bash
+git clone https://github.com/peshk1n/site-monitor.git
+cd site-monitor
+```
+
+2. Create a `.env` file based on `.env.example`:
+```bash
+cp .env.example .env
+```
+
+3. Fill in the environment variables in `.env` (see [Environment Variables](#environment-variables))
+
+4. Start the application:
+```bash
+docker-compose up --build
+```
+
+Migrations are applied automatically on first run.
+
+### Running without Docker
+
+#### Prerequisites
 
 - Go 1.22+
 - PostgreSQL
 
-### Installation
+#### Installation
 
 1. Clone the repository:
 ```bash
@@ -47,8 +72,8 @@ cp .env.example .env
 
 5. Apply migrations:
 ```bash
-psql -U postgres -d sitemonitor -f migrations/001_create_monitors.sql
-psql -U postgres -d sitemonitor -f migrations/002_create_checks.sql
+psql -U postgres -d sitemonitor -f migrations/up/001_create_monitors.up.sql
+psql -U postgres -d sitemonitor -f migrations/up/002_create_checks.up.sql
 ```
 
 6. Run the application:
@@ -60,10 +85,14 @@ go run cmd/server/main.go
 
 | Variable | Description |
 |----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (local) |
+| `DATABASE_URL_DOCKER` | PostgreSQL connection string (Docker) |
 | `SERVER_PORT` | HTTP server port |
 | `TELEGRAM_TOKEN` | Telegram bot token from @BotFather |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat ID |
+| `POSTGRES_DB` | PostgreSQL database name |
+| `POSTGRES_USER` | PostgreSQL username |
+| `POSTGRES_PASSWORD` | PostgreSQL password |
 
 ## REST API
 
@@ -89,7 +118,7 @@ Create a monitor:
 ```bash
 curl -X POST http://localhost:8080/api/v1/monitors \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://google.com", "interval": 60}'
+  -d '{"url": "https://google.com", "interval": 60, "timeout": 10}'
 ```
 
 ## Telegram Bot Commands
