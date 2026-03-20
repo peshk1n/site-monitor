@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -24,7 +25,6 @@ func main() {
 	cfg := config.Load()
 
 	database := db.Connect(cfg.DBUrl)
-	defer database.Close()
 
 	monitorRepo := repository.NewMonitorRepository(database)
 	checkRepo := repository.NewCheckRepository(database)
@@ -42,25 +42,41 @@ func main() {
 	checkService := service.NewCheckService(checkRepo, monitorRepo, notifier)
 	tgBot := bot.NewBot(telegramBot, cfg.TelegramChatID, monitorService, checkService)
 	tgBot.Start()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
 	s := scheduler.NewScheduler(monitorService, checkService)
-	s.Start()
+	s.Start(ctx)
+
 	monitorHandler := handler.NewMonitorHandler(monitorService)
 	checkHandler := handler.NewCheckHandler(checkService)
 	r := router.NewRouter(monitorHandler, checkHandler)
+
+	srv := &http.Server{
+		Addr:    ":" + cfg.ServerPort,
+		Handler: r,
+	}
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-quit
-		log.Println("Завершение работы...")
-		s.Stop()
+		log.Println("Shutting down...")
+		cancel()
 		tgBot.Stop()
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Println("HTTP server shutdown error:", err)
+		}
+
 		database.Close()
-		os.Exit(0)
 	}()
 
-	log.Println("Сервер запущен на порту", cfg.ServerPort)
-	if err := http.ListenAndServe(":"+cfg.ServerPort, r); err != nil {
+	log.Println("Server started on port", cfg.ServerPort)
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }

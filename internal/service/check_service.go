@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -29,12 +30,12 @@ func NewCheckService(
 	}
 }
 
-func (s *CheckService) RunCheck(monitor models.Monitor) error {
+func (s *CheckService) RunCheck(ctx context.Context, monitor models.Monitor) error {
 	client := &http.Client{
 		Timeout: time.Duration(monitor.Timeout) * time.Second,
 	}
 
-	req, err := http.NewRequest(http.MethodGet, monitor.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, monitor.URL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -45,12 +46,16 @@ func (s *CheckService) RunCheck(monitor models.Monitor) error {
 	start := time.Now()
 	resp, err := client.Do(req)
 	responseMs := int(time.Since(start).Milliseconds())
+
 	check := &models.Check{
 		MonitorID:  monitor.ID,
 		ResponseMs: responseMs,
 	}
 
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		check.IsUp = false
 		check.Error = err.Error()
 		log.Printf("%s is DOWN: %s\n", monitor.URL, err.Error())
@@ -67,6 +72,7 @@ func (s *CheckService) RunCheck(monitor models.Monitor) error {
 	}
 
 	lastCheck, lastErr := s.checkRepo.GetLastCheck(monitor.ID)
+
 	if err := s.checkRepo.Create(check); err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"log"
 	"sync"
 	"time"
@@ -12,7 +13,6 @@ import (
 type Scheduler struct {
 	monitorService *service.MonitorService
 	checkService   *service.CheckService
-	stopChan       chan struct{}
 }
 
 func NewScheduler(
@@ -22,14 +22,14 @@ func NewScheduler(
 	return &Scheduler{
 		monitorService: monitorService,
 		checkService:   checkService,
-		stopChan:       make(chan struct{}),
 	}
 }
-func (s *Scheduler) Start() {
+
+func (s *Scheduler) Start(ctx context.Context) {
 	log.Println("Scheduler started")
 
 	go func() {
-		s.runChecks()
+		s.runChecks(ctx)
 
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -37,8 +37,8 @@ func (s *Scheduler) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				s.runChecks()
-			case <-s.stopChan:
+				s.runChecks(ctx)
+			case <-ctx.Done():
 				log.Println("Scheduler stopped")
 				return
 			}
@@ -46,11 +46,7 @@ func (s *Scheduler) Start() {
 	}()
 }
 
-func (s *Scheduler) Stop() {
-	close(s.stopChan)
-}
-
-func (s *Scheduler) runChecks() {
+func (s *Scheduler) runChecks(ctx context.Context) {
 	monitors, err := s.monitorService.GetAll()
 	if err != nil {
 		log.Println("Failed to load monitors:", err)
@@ -70,7 +66,7 @@ func (s *Scheduler) runChecks() {
 		wg.Add(1)
 		go func(m models.Monitor) {
 			defer wg.Done()
-			if err := s.checkService.RunCheck(m); err != nil {
+			if err := s.checkService.RunCheck(ctx, m); err != nil {
 				log.Println("Failed to check monitor:", err)
 			}
 		}(monitor)

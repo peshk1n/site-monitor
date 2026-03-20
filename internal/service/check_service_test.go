@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -104,7 +105,7 @@ func TestCheckService_RunCheck_SiteUp_FirstCheck(t *testing.T) {
 	monitorRepo := &mockMonitorRepository{}
 
 	svc := service.NewCheckService(checkRepo, monitorRepo, notifier)
-	err := svc.RunCheck(models.Monitor{
+	err := svc.RunCheck(context.Background(), models.Monitor{
 		ID:      1,
 		URL:     "https://google.com",
 		Timeout: 10,
@@ -132,7 +133,7 @@ func TestCheckService_RunCheck_StatusUnchanged_NoAlert(t *testing.T) {
 	monitorRepo := &mockMonitorRepository{}
 
 	svc := service.NewCheckService(checkRepo, monitorRepo, notifier)
-	err := svc.RunCheck(models.Monitor{
+	err := svc.RunCheck(context.Background(), models.Monitor{
 		ID:      1,
 		URL:     "https://google.com",
 		Timeout: 10,
@@ -160,7 +161,7 @@ func TestCheckService_RunCheck_StatusChanged_AlertSent(t *testing.T) {
 	monitorRepo := &mockMonitorRepository{}
 
 	svc := service.NewCheckService(checkRepo, monitorRepo, notifier)
-	err := svc.RunCheck(models.Monitor{
+	err := svc.RunCheck(context.Background(), models.Monitor{
 		ID:      1,
 		URL:     "https://thiswebsitedoesnotexist123.com",
 		Timeout: 5,
@@ -189,7 +190,7 @@ func TestCheckService_RunCheck_SaveFailed(t *testing.T) {
 	monitorRepo := &mockMonitorRepository{}
 
 	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{})
-	err := svc.RunCheck(models.Monitor{
+	err := svc.RunCheck(context.Background(), models.Monitor{
 		ID:      1,
 		URL:     "https://google.com",
 		Timeout: 10,
