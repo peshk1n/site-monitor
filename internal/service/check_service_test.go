@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/peshk1n/site-monitor/internal/models"
@@ -62,7 +63,7 @@ func TestCheckService_GetByMonitorID_Success(t *testing.T) {
 		},
 	}
 
-	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{})
+	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{}, slog.Default())
 	checks, err := svc.GetByMonitorID(1)
 
 	if err != nil {
@@ -81,7 +82,7 @@ func TestCheckService_GetByMonitorID_MonitorNotFound(t *testing.T) {
 		},
 	}
 
-	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{})
+	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{}, slog.Default())
 	_, err := svc.GetByMonitorID(999)
 
 	if !errors.Is(err, service.ErrMonitorNotFound) {
@@ -104,7 +105,7 @@ func TestCheckService_RunCheck_SiteUp_FirstCheck(t *testing.T) {
 	}
 	monitorRepo := &mockMonitorRepository{}
 
-	svc := service.NewCheckService(checkRepo, monitorRepo, notifier)
+	svc := service.NewCheckService(checkRepo, monitorRepo, notifier, slog.Default())
 	err := svc.RunCheck(context.Background(), models.Monitor{
 		ID:      1,
 		URL:     "https://google.com",
@@ -132,7 +133,7 @@ func TestCheckService_RunCheck_StatusUnchanged_NoAlert(t *testing.T) {
 	}
 	monitorRepo := &mockMonitorRepository{}
 
-	svc := service.NewCheckService(checkRepo, monitorRepo, notifier)
+	svc := service.NewCheckService(checkRepo, monitorRepo, notifier, slog.Default())
 	err := svc.RunCheck(context.Background(), models.Monitor{
 		ID:      1,
 		URL:     "https://google.com",
@@ -160,7 +161,7 @@ func TestCheckService_RunCheck_StatusChanged_AlertSent(t *testing.T) {
 	}
 	monitorRepo := &mockMonitorRepository{}
 
-	svc := service.NewCheckService(checkRepo, monitorRepo, notifier)
+	svc := service.NewCheckService(checkRepo, monitorRepo, notifier, slog.Default())
 	err := svc.RunCheck(context.Background(), models.Monitor{
 		ID:      1,
 		URL:     "https://thiswebsitedoesnotexist123.com",
@@ -189,7 +190,7 @@ func TestCheckService_RunCheck_SaveFailed(t *testing.T) {
 	}
 	monitorRepo := &mockMonitorRepository{}
 
-	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{})
+	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{}, slog.Default())
 	err := svc.RunCheck(context.Background(), models.Monitor{
 		ID:      1,
 		URL:     "https://google.com",

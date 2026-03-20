@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -13,20 +14,23 @@ import (
 type Scheduler struct {
 	monitorService *service.MonitorService
 	checkService   *service.CheckService
+	log            *slog.Logger
 }
 
 func NewScheduler(
 	monitorService *service.MonitorService,
 	checkService *service.CheckService,
+	log *slog.Logger,
 ) *Scheduler {
 	return &Scheduler{
 		monitorService: monitorService,
 		checkService:   checkService,
+		log:            log,
 	}
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	log.Println("Scheduler started")
+	s.log.Info("Scheduler started")
 
 	go func() {
 		s.runChecks(ctx)
@@ -39,7 +43,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 			case <-ticker.C:
 				s.runChecks(ctx)
 			case <-ctx.Done():
-				log.Println("Scheduler stopped")
+				s.log.Info("Scheduler stopped")
 				return
 			}
 		}
@@ -49,7 +53,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 func (s *Scheduler) runChecks(ctx context.Context) {
 	monitors, err := s.monitorService.GetAll()
 	if err != nil {
-		log.Println("Failed to load monitors:", err)
+		s.log.Error("Failed to load monitors:", "error", err)
 		return
 	}
 
@@ -67,11 +71,11 @@ func (s *Scheduler) runChecks(ctx context.Context) {
 		go func(m models.Monitor) {
 			defer wg.Done()
 			if err := s.checkService.RunCheck(ctx, m); err != nil {
-				log.Println("Failed to check monitor:", err)
+				log.Println("Failed to check monitor:", "url", m.URL, "error", err)
 			}
 		}(monitor)
 	}
 
 	wg.Wait()
-	log.Println("All checks completed")
+	s.log.Info("All checks completed")
 }

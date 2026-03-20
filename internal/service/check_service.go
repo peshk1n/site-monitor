@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,17 +16,20 @@ type CheckService struct {
 	checkRepo   CheckRepository
 	monitorRepo MonitorRepository
 	notifier    Notifier
+	log         *slog.Logger
 }
 
 func NewCheckService(
 	checkRepo CheckRepository,
 	monitorRepo MonitorRepository,
 	notifier Notifier,
+	log *slog.Logger,
 ) *CheckService {
 	return &CheckService{
 		checkRepo:   checkRepo,
 		monitorRepo: monitorRepo,
 		notifier:    notifier,
+		log:         log,
 	}
 }
 
@@ -58,16 +61,16 @@ func (s *CheckService) RunCheck(ctx context.Context, monitor models.Monitor) err
 		}
 		check.IsUp = false
 		check.Error = err.Error()
-		log.Printf("%s is DOWN: %s\n", monitor.URL, err.Error())
+		s.log.Warn("Site is DOWN", "url", monitor.URL, "error", err.Error())
 	} else {
 		defer resp.Body.Close()
 		check.StatusCode = resp.StatusCode
 		check.IsUp = resp.StatusCode < 400
 		if !check.IsUp {
 			check.Error = "HTTP " + http.StatusText(resp.StatusCode)
-			log.Printf("%s returned %d\n", monitor.URL, resp.StatusCode)
+			s.log.Warn("Site returned error status", "url", monitor.URL, "status_code", resp.StatusCode)
 		} else {
-			log.Printf("%s is UP (%d ms)\n", monitor.URL, responseMs)
+			s.log.Info("Site is UP", "url", monitor.URL, "duration_ms", responseMs)
 		}
 	}
 
