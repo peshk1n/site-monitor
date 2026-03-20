@@ -15,7 +15,7 @@ type Config struct {
 }
 
 func Load() *Config {
-	godotenv.Load()
+	godotenv.Overload()
 
 	chatID, _ := strconv.ParseInt(os.Getenv("TELEGRAM_CHAT_ID"), 10, 64)
 
