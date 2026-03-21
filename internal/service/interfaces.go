@@ -1,6 +1,10 @@
 package service
 
-import "github.com/peshk1n/site-monitor/internal/models"
+import (
+	"time"
+
+	"github.com/peshk1n/site-monitor/internal/models"
+)
 
 type MonitorRepository interface {
 	GetAll() ([]models.Monitor, error)
@@ -11,8 +15,9 @@ type MonitorRepository interface {
 
 type CheckRepository interface {
 	Create(check *models.Check) error
-	GetByMonitorID(monitorID int) ([]models.Check, error)
+	GetByMonitorID(monitorID, limit, offset int) ([]models.Check, error)
 	GetLastCheck(monitorID int) (*models.Check, error)
+	GetUptimeStats(monitorID int, since time.Time) (total int, successful int, err error)
 }
 
 type Notifier interface {

@@ -12,6 +12,12 @@ import (
 	"github.com/peshk1n/site-monitor/internal/models"
 )
 
+type UptimeStats struct {
+	Uptime24h float64
+	Uptime7d  float64
+	Uptime30d float64
+}
+
 type CheckService struct {
 	checkRepo   CheckRepository
 	monitorRepo MonitorRepository
@@ -87,7 +93,7 @@ func (s *CheckService) RunCheck(ctx context.Context, monitor models.Monitor) err
 	return nil
 }
 
-func (s *CheckService) GetByMonitorID(monitorID int) ([]models.Check, error) {
+func (s *CheckService) GetByMonitorID(monitorID, limit, offset int) ([]models.Check, error) {
 	_, err := s.monitorRepo.GetByID(monitorID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -96,7 +102,7 @@ func (s *CheckService) GetByMonitorID(monitorID int) ([]models.Check, error) {
 		return nil, err
 	}
 
-	return s.checkRepo.GetByMonitorID(monitorID)
+	return s.checkRepo.GetByMonitorID(monitorID, limit, offset)
 }
 
 func (s *CheckService) GetLastByMonitorID(monitorID int) (*models.Check, error) {
@@ -121,4 +127,27 @@ func (s *CheckService) GetLastByMonitorID(monitorID int) (*models.Check, error) 
 
 func (s *CheckService) Create(check *models.Check) error {
 	return s.checkRepo.Create(check)
+}
+
+func (s *CheckService) GetUptimeStats(monitorID int) (*UptimeStats, error) {
+	_, err := s.monitorRepo.GetByID(monitorID)
+	if err != nil {
+		return nil, ErrMonitorNotFound
+	}
+
+	now := time.Now()
+
+	calc := func(since time.Time) float64 {
+		total, successful, err := s.checkRepo.GetUptimeStats(monitorID, since)
+		if err != nil || total == 0 {
+			return 0
+		}
+		return float64(successful) / float64(total) * 100
+	}
+
+	return &UptimeStats{
+		Uptime24h: calc(now.Add(-24 * time.Hour)),
+		Uptime7d:  calc(now.Add(-7 * 24 * time.Hour)),
+		Uptime30d: calc(now.Add(-30 * 24 * time.Hour)),
+	}, nil
 }

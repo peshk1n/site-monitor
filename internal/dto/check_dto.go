@@ -13,3 +13,9 @@ type CheckResponse struct {
 type CheckListResponse struct {
 	Checks []CheckResponse `json:"checks"`
 }
+
+type UptimeStatsResponse struct {
+	Uptime24h string `json:"uptime_24h"`
+	Uptime7d  string `json:"uptime_7d"`
+	Uptime30d string `json:"uptime_30d"`
+}

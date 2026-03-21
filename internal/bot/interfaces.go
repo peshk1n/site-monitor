@@ -1,6 +1,9 @@
 package bot
 
-import "github.com/peshk1n/site-monitor/internal/models"
+import (
+	"github.com/peshk1n/site-monitor/internal/models"
+	"github.com/peshk1n/site-monitor/internal/service"
+)
 
 type MonitorService interface {
 	GetAll() ([]models.Monitor, error)
@@ -11,4 +14,5 @@ type MonitorService interface {
 
 type CheckService interface {
 	GetLastByMonitorID(monitorID int) (*models.Check, error)
+	GetUptimeStats(monitorID int) (*service.UptimeStats, error)
 }

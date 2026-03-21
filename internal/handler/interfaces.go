@@ -1,6 +1,9 @@
 package handler
 
-import "github.com/peshk1n/site-monitor/internal/models"
+import (
+	"github.com/peshk1n/site-monitor/internal/models"
+	"github.com/peshk1n/site-monitor/internal/service"
+)
 
 type MonitorService interface {
 	GetAll() ([]models.Monitor, error)
@@ -10,6 +13,7 @@ type MonitorService interface {
 }
 
 type CheckService interface {
-	GetByMonitorID(monitorID int) ([]models.Check, error)
+	GetByMonitorID(monitorID, limit, offset int) ([]models.Check, error)
 	GetLastByMonitorID(monitorID int) (*models.Check, error)
+	GetUptimeStats(monitorID int) (*service.UptimeStats, error)
 }

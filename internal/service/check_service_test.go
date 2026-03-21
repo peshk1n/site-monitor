@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/peshk1n/site-monitor/internal/models"
 	"github.com/peshk1n/site-monitor/internal/service"
@@ -13,18 +14,22 @@ import (
 
 type mockCheckRepository struct {
 	CreateFn         func(check *models.Check) error
-	GetByMonitorIDFn func(monitorID int) ([]models.Check, error)
+	GetByMonitorIDFn func(monitorID, limit, offset int) ([]models.Check, error)
 	GetLastCheckFn   func(monitorID int) (*models.Check, error)
+	GetUptimeStatsFn func(monitorID int, since time.Time) (int, int, error)
 }
 
 func (m *mockCheckRepository) Create(check *models.Check) error {
 	return m.CreateFn(check)
 }
-func (m *mockCheckRepository) GetByMonitorID(monitorID int) ([]models.Check, error) {
-	return m.GetByMonitorIDFn(monitorID)
+func (m *mockCheckRepository) GetByMonitorID(monitorID, limit, offset int) ([]models.Check, error) {
+	return m.GetByMonitorIDFn(monitorID, limit, offset)
 }
 func (m *mockCheckRepository) GetLastCheck(monitorID int) (*models.Check, error) {
 	return m.GetLastCheckFn(monitorID)
+}
+func (m *mockCheckRepository) GetUptimeStats(monitorID int, since time.Time) (int, int, error) {
+	return m.GetUptimeStatsFn(monitorID, since)
 }
 
 type mockNotifier struct {
@@ -53,7 +58,7 @@ func TestCheckService_GetByMonitorID_Success(t *testing.T) {
 	}
 
 	checkRepo := &mockCheckRepository{
-		GetByMonitorIDFn: func(monitorID int) ([]models.Check, error) {
+		GetByMonitorIDFn: func(monitorID, limit, offset int) ([]models.Check, error) {
 			return expected, nil
 		},
 	}
@@ -64,7 +69,7 @@ func TestCheckService_GetByMonitorID_Success(t *testing.T) {
 	}
 
 	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{}, slog.Default())
-	checks, err := svc.GetByMonitorID(1)
+	checks, err := svc.GetByMonitorID(1, 20, 0)
 
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -83,7 +88,7 @@ func TestCheckService_GetByMonitorID_MonitorNotFound(t *testing.T) {
 	}
 
 	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{}, slog.Default())
-	_, err := svc.GetByMonitorID(999)
+	_, err := svc.GetByMonitorID(999, 20, 0)
 
 	if !errors.Is(err, service.ErrMonitorNotFound) {
 		t.Errorf("expected ErrMonitorNotFound, got %v", err)
@@ -198,5 +203,69 @@ func TestCheckService_RunCheck_SaveFailed(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error when save fails")
+	}
+}
+
+// --- Тесты GetUptimeStats ---
+
+func TestCheckService_GetUptimeStats_Success(t *testing.T) {
+	checkRepo := &mockCheckRepository{
+		GetUptimeStatsFn: func(monitorID int, since time.Time) (int, int, error) {
+			return 100, 99, nil
+		},
+	}
+	monitorRepo := &mockMonitorRepository{
+		GetByIDFn: func(id int) (*models.Monitor, error) {
+			return &models.Monitor{ID: id}, nil
+		},
+	}
+
+	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{}, slog.Default())
+	stats, err := svc.GetUptimeStats(1)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if stats.Uptime24h != 99.0 {
+		t.Errorf("expected uptime 99.0, got %.2f", stats.Uptime24h)
+	}
+}
+
+func TestCheckService_GetUptimeStats_MonitorNotFound(t *testing.T) {
+	checkRepo := &mockCheckRepository{}
+	monitorRepo := &mockMonitorRepository{
+		GetByIDFn: func(id int) (*models.Monitor, error) {
+			return nil, sql.ErrNoRows
+		},
+	}
+
+	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{}, slog.Default())
+	_, err := svc.GetUptimeStats(999)
+
+	if !errors.Is(err, service.ErrMonitorNotFound) {
+		t.Errorf("expected ErrMonitorNotFound, got %v", err)
+	}
+}
+
+func TestCheckService_GetUptimeStats_NoChecks(t *testing.T) {
+	checkRepo := &mockCheckRepository{
+		GetUptimeStatsFn: func(monitorID int, since time.Time) (int, int, error) {
+			return 0, 0, nil
+		},
+	}
+	monitorRepo := &mockMonitorRepository{
+		GetByIDFn: func(id int) (*models.Monitor, error) {
+			return &models.Monitor{ID: id}, nil
+		},
+	}
+
+	svc := service.NewCheckService(checkRepo, monitorRepo, &mockNotifier{}, slog.Default())
+	stats, err := svc.GetUptimeStats(1)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if stats.Uptime24h != 0 {
+		t.Errorf("expected uptime 0, got %.2f", stats.Uptime24h)
 	}
 }

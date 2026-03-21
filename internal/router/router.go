@@ -22,6 +22,7 @@ func NewRouter(
 
 		r.Get("/{id}/checks", checkHandler.GetByMonitorID)
 		r.Get("/{id}/checks/last", checkHandler.GetLastByMonitorID)
+		r.Get("/{id}/uptime", checkHandler.GetUptimeStats)
 	})
 	return r
 }

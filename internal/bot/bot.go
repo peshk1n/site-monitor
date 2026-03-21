@@ -112,9 +112,16 @@ func (b *Bot) handleList(c tele.Context) error {
 				status = "❌ недоступен"
 			}
 		}
+
+		uptime := ""
+		stats, err := b.checkService.GetUptimeStats(m.ID)
+		if err == nil {
+			uptime = fmt.Sprintf("Uptime 24h: %.2f%%\n", stats.Uptime24h)
+		}
+
 		sb.WriteString(fmt.Sprintf(
-			"ID: %d | %s\nСтатус: %s\nИнтервал: %ds\n\n",
-			m.ID, m.URL, status, m.Interval,
+			"*ID:* %d | `%s`\n*Статус:* %s\n%s*Интервал:* %ds\n\n",
+			m.ID, m.URL, status, uptime, m.Interval,
 		))
 	}
 
