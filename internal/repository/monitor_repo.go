@@ -65,3 +65,26 @@ func (r *MonitorRepository) Delete(id int) error {
 
 	return nil
 }
+
+// обновляет монитор по ID
+func (r *MonitorRepository) Update(monitor *models.Monitor) error {
+	query := `
+		UPDATE monitors
+		SET interval = $1, timeout = $2, is_active = $3
+		WHERE id = $4`
+
+	result, err := r.db.Exec(query, monitor.Interval, monitor.Timeout, monitor.IsActive, monitor.ID)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
+}

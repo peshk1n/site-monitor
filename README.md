@@ -4,11 +4,13 @@ A website monitoring service that periodically checks the availability of websit
 
 ## Features
 
-- Periodic HTTP checks for monitored websites
+- Periodic HTTP checks for monitored websites with automatic recheck before alerting
 - Telegram notifications on status changes
+- Uptime statistics (24h, 7d, 30d)
 - REST API for managing monitors
 - Telegram bot for managing monitors and viewing status
-- Check history with response times
+- Check history with response times and pagination
+- Pause/resume monitors without deleting them
 
 ## Tech Stack
 
@@ -103,16 +105,18 @@ go run cmd/server/main.go
 | `GET` | `/api/v1/monitors` | Get all monitors |
 | `POST` | `/api/v1/monitors` | Create a new monitor |
 | `GET` | `/api/v1/monitors/{id}` | Get monitor by ID |
+| `PATCH` | `/api/v1/monitors/{id}` | Update monitor (interval, timeout, is_active) |
 | `DELETE` | `/api/v1/monitors/{id}` | Delete a monitor |
 
 ### Checks
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/v1/monitors/{id}/checks` | Get check history for a monitor |
+| `GET` | `/api/v1/monitors/{id}/checks` | Get check history (supports `?limit=20&offset=0`) |
 | `GET` | `/api/v1/monitors/{id}/checks/last` | Get last check for a monitor |
+| `GET` | `/api/v1/monitors/{id}/uptime` | Get uptime statistics |
 
-### Example
+### Examples
 
 Create a monitor:
 ```bash
@@ -121,12 +125,30 @@ curl -X POST http://localhost:8080/api/v1/monitors \
   -d '{"url": "https://google.com", "interval": 60, "timeout": 10}'
 ```
 
+Pause a monitor:
+```bash
+curl -X PATCH http://localhost:8080/api/v1/monitors/1 \
+  -H "Content-Type: application/json" \
+  -d '{"is_active": false}'
+```
+
+Get check history with pagination:
+```bash
+curl http://localhost:8080/api/v1/monitors/1/checks?limit=20&offset=0
+```
+
+Get uptime stats:
+```bash
+curl http://localhost:8080/api/v1/monitors/1/uptime
+```
+
 ## Telegram Bot Commands
 
 | Command | Description |
 |---------|-------------|
 | `/start` | Show available commands |
-| `/list` | List all monitors with current status |
+| `/list` | List all monitors with current status and uptime |
 | `/add` | Add a new website to monitor |
 | `/delete` | Remove a monitor |
+| `/toggle` | Pause or resume a monitor |
 | `/status` | View last check details for a monitor |

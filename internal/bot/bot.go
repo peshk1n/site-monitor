@@ -12,10 +12,11 @@ import (
 type dialogState int
 
 const (
-	stateIdle         dialogState = iota // 0
-	stateWaitingURL                      // 1
-	stateWaitingDelID                    // 2
-	stateWaitingStID                     // 3
+	stateIdle            dialogState = iota // 0
+	stateWaitingURL                         // 1
+	stateWaitingDelID                       // 2
+	stateWaitingStID                        // 3
+	stateWaitingToggleID                    // 4
 )
 
 var SendSettings = &tele.SendOptions{
@@ -61,7 +62,7 @@ func (b *Bot) registerHandlers() {
 	b.bot.Use(func(next tele.HandlerFunc) tele.HandlerFunc {
 		return func(c tele.Context) error {
 			if c.Chat().ID != b.allowedChatID {
-				return c.Send("Доступ запрещён.", SendSettings)
+				return c.Send("❌ *Access denied.*", SendSettings)
 			}
 			return next(c)
 		}
@@ -71,6 +72,7 @@ func (b *Bot) registerHandlers() {
 	b.bot.Handle("/list", b.handleList)
 	b.bot.Handle("/add", b.handleAdd)
 	b.bot.Handle("/delete", b.handleDelete)
+	b.bot.Handle("/toggle", b.handleToggle)
 	b.bot.Handle("/status", b.handleStatus)
 	b.bot.Handle(tele.OnText, b.handleText)
 }
@@ -78,49 +80,54 @@ func (b *Bot) registerHandlers() {
 func (b *Bot) handleStart(c tele.Context) error {
 	b.state = stateIdle
 	return c.Send(
-		"👋 Привет! Я бот для мониторинга сайтов.\n\n"+
-			"Доступные команды:\n"+
-			"/list — список всех мониторов\n"+
-			"/add — добавить сайт на мониторинг\n"+
-			"/delete — удалить монитор\n"+
-			"/status — последняя проверка сайта",
+		"👋 *Hello! I'm a website monitoring bot.*\n\n"+
+			"*Available commands:*\n"+
+			"/list — show all monitors\n"+
+			"/add — add a new monitor\n"+
+			"/delete — delete a monitor\n"+
+			"/toggle — enable/disable a monitor\n"+
+			"/status — show last check result",
 		SendSettings,
 	)
 }
 
 func (b *Bot) handleList(c tele.Context) error {
 	b.state = stateIdle
-
 	monitors, err := b.monitorService.GetAll()
 	if err != nil {
-		return c.Send("Ошибка при получении списка мониторов.", SendSettings)
+		return c.Send("❌ *Failed to retrieve monitor list.*", SendSettings)
 	}
 	if len(monitors) == 0 {
-		return c.Send("Мониторов пока нет. Добавь первый через /add", SendSettings)
+		return c.Send("ℹ️ *No monitors yet. Add one using /add*", SendSettings)
 	}
 
 	var sb strings.Builder
-	sb.WriteString("📋 *Список мониторов:*\n\n")
+	sb.WriteString("📋 *Monitor List:*\n\n")
 
 	for _, m := range monitors {
-		lastCheck, err := b.checkService.GetLastByMonitorID(m.ID)
-		status := "⏳ нет данных"
-		if err == nil {
-			if lastCheck.IsUp {
-				status = fmt.Sprintf("✅ доступен (%d ms)", lastCheck.ResponseMs)
+		var status string
+
+		if !m.IsActive {
+			status = "🟡 paused"
+		} else {
+			lastCheck, err := b.checkService.GetLastByMonitorID(m.ID)
+			if err != nil {
+				status = "⚪ unknown"
+			} else if lastCheck.IsUp {
+				status = fmt.Sprintf("🟢 up (%d ms)", lastCheck.ResponseMs)
 			} else {
-				status = "❌ недоступен"
+				status = "🔴 down"
 			}
 		}
 
 		uptime := ""
 		stats, err := b.checkService.GetUptimeStats(m.ID)
 		if err == nil {
-			uptime = fmt.Sprintf("Uptime 24h: %.2f%%\n", stats.Uptime24h)
+			uptime = fmt.Sprintf("*Uptime (24h):* %.2f%%\n", stats.Uptime24h)
 		}
 
 		sb.WriteString(fmt.Sprintf(
-			"*ID:* %d | `%s`\n*Статус:* %s\n%s*Интервал:* %ds\n\n",
+			"*ID:* %d | `%s`\n*Status:* %s\n%s*Interval:* %ds\n\n",
 			m.ID, m.URL, status, uptime, m.Interval,
 		))
 	}
@@ -130,22 +137,22 @@ func (b *Bot) handleList(c tele.Context) error {
 
 func (b *Bot) handleAdd(c tele.Context) error {
 	b.state = stateWaitingURL
-	return c.Send("Введи URL сайта для мониторинга (например: https://google.com)", SendSettings)
+	return c.Send("*Enter the website URL (e.g.: https://google.com):*", SendSettings)
 }
 
 func (b *Bot) handleDelete(c tele.Context) error {
 	monitors, err := b.monitorService.GetAll()
 	if err != nil {
-		return c.Send("Ошибка при получении списка мониторов.", SendSettings)
+		return c.Send("❌ *Failed to retrieve monitor list.*", SendSettings)
 	}
 	if len(monitors) == 0 {
-		return c.Send("Мониторов пока нет.", SendSettings)
+		return c.Send("ℹ️ *No monitors available.*", SendSettings)
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Выбери ID монитора для удаления:\n\n")
+	sb.WriteString("*Select monitor ID to delete:*\n\n")
 	for _, m := range monitors {
-		sb.WriteString(fmt.Sprintf("ID: %d | %s\n", m.ID, m.URL))
+		sb.WriteString(fmt.Sprintf("*ID:* %d | `%s`\n", m.ID, m.URL))
 	}
 
 	b.state = stateWaitingDelID
@@ -155,16 +162,16 @@ func (b *Bot) handleDelete(c tele.Context) error {
 func (b *Bot) handleStatus(c tele.Context) error {
 	monitors, err := b.monitorService.GetAll()
 	if err != nil {
-		return c.Send("Ошибка при получении списка мониторов.", SendSettings)
+		return c.Send("❌ *Failed to retrieve monitor list.*", SendSettings)
 	}
 	if len(monitors) == 0 {
-		return c.Send("Мониторов пока нет.", SendSettings)
+		return c.Send("ℹ️ *No monitors available.*", SendSettings)
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Выбери ID монитора:\n\n")
+	sb.WriteString("*Select monitor ID:*\n\n")
 	for _, m := range monitors {
-		sb.WriteString(fmt.Sprintf("ID: %d | %s\n", m.ID, m.URL))
+		sb.WriteString(fmt.Sprintf("*ID:* %d | `%s`\n", m.ID, m.URL))
 	}
 
 	b.state = stateWaitingStID
@@ -181,24 +188,26 @@ func (b *Bot) handleText(c tele.Context) error {
 		return b.handleDeleteID(c, text)
 	case stateWaitingStID:
 		return b.handleStatusID(c, text)
+	case stateWaitingToggleID:
+		return b.handleToggleID(c, text)
 	default:
-		return c.Send("Не понимаю команду. Используй /start чтобы увидеть список команд.", SendSettings)
+		return c.Send("❓ *Unknown command. Use /start to see available commands.*", SendSettings)
 	}
 }
 
 func (b *Bot) handleAddURL(c tele.Context, url string) error {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return c.Send("❌ URL должен начинаться с http:// или https://\nПопробуй ещё раз:", SendSettings)
+		return c.Send("❌ *URL must start with http:// or https://*\nTry again:", SendSettings)
 	}
 	b.state = stateIdle
 
 	monitor, err := b.monitorService.Create(url, 60, 10)
 	if err != nil {
-		return c.Send("Ошибка при создании монитора.", SendSettings)
+		return c.Send("❌ *Failed to create monitor.*", SendSettings)
 	}
 
 	return c.Send(fmt.Sprintf(
-		"✅ Монитор добавлен!\nID: %d\nURL: %s\nИнтервал: %ds",
+		"✅ *Monitor added!*\n*ID:* %d\n*URL:* `%s`\n*Interval:* %ds",
 		monitor.ID, monitor.URL, monitor.Interval,
 	), SendSettings)
 }
@@ -206,38 +215,38 @@ func (b *Bot) handleAddURL(c tele.Context, url string) error {
 func (b *Bot) handleDeleteID(c tele.Context, text string) error {
 	id, err := strconv.Atoi(text)
 	if err != nil {
-		return c.Send("❌ Введи числовой ID монитора:", SendSettings)
+		return c.Send("❌ *Please enter a numeric monitor ID:*", SendSettings)
 	}
 
 	b.state = stateIdle
 
 	if err := b.monitorService.Delete(id); err != nil {
-		return c.Send("❌ Монитор не найден.", SendSettings)
+		return c.Send("❌ *Monitor not found.*", SendSettings)
 	}
 
-	return c.Send(fmt.Sprintf("✅ Монитор ID %d удалён.", id), SendSettings)
+	return c.Send(fmt.Sprintf("✅ *Monitor ID %d deleted.*", id), SendSettings)
 }
 
 func (b *Bot) handleStatusID(c tele.Context, text string) error {
 	id, err := strconv.Atoi(text)
 	if err != nil {
-		return c.Send("❌ Введи числовой ID монитора:", SendSettings)
+		return c.Send("❌ *Please enter a numeric monitor ID:*", SendSettings)
 	}
 
 	b.state = stateIdle
 
 	check, err := b.checkService.GetLastByMonitorID(id)
 	if err != nil {
-		return c.Send("❌ Монитор не найден или проверок ещё не было.", SendSettings)
+		return c.Send("❌ *Monitor not found or no checks yet.*", SendSettings)
 	}
 
-	status := "✅ доступен"
+	status := "✅ up"
 	if !check.IsUp {
-		status = "❌ недоступен"
+		status = "❌ down"
 	}
 
 	msg := fmt.Sprintf(
-		"📊 Последняя проверка:\nСтатус: %s\nВремя ответа: %d ms\nКод ответа: %d\nПроверено: %s",
+		"📊 *Last check:*\n*Status:* %s\n*Response time:* %d ms\n*Status code:* %d\n*Checked at:* %s",
 		status,
 		check.ResponseMs,
 		check.StatusCode,
@@ -245,8 +254,57 @@ func (b *Bot) handleStatusID(c tele.Context, text string) error {
 	)
 
 	if check.Error != "" {
-		msg += fmt.Sprintf("\nОшибка: %s", check.Error)
+		msg += fmt.Sprintf("\n*Error:* %s", check.Error)
 	}
 
 	return c.Send(msg, SendSettings)
+}
+
+func (b *Bot) handleToggle(c tele.Context) error {
+	monitors, err := b.monitorService.GetAll()
+	if err != nil {
+		return c.Send("❌ *Failed to retrieve monitor list.*", SendSettings)
+	}
+	if len(monitors) == 0 {
+		return c.Send("ℹ️ *No monitors available.*", SendSettings)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("*Select monitor ID:*\n\n")
+	for _, m := range monitors {
+		status := "✅"
+		if !m.IsActive {
+			status = "⏸"
+		}
+		sb.WriteString(fmt.Sprintf("%s *ID:* %d | `%s`\n", status, m.ID, m.URL))
+	}
+	sb.WriteString("\n*Enter ID:*")
+
+	b.state = stateWaitingToggleID
+	return c.Send(sb.String(), SendSettings)
+}
+
+func (b *Bot) handleToggleID(c tele.Context, text string) error {
+	id, err := strconv.Atoi(text)
+	if err != nil {
+		return c.Send("❌ *Please enter a numeric monitor ID:*", SendSettings)
+	}
+
+	b.state = stateIdle
+
+	monitor, err := b.monitorService.GetByID(id)
+	if err != nil {
+		return c.Send("❌ *Monitor not found.*", SendSettings)
+	}
+
+	newStatus := !monitor.IsActive
+	_, err = b.monitorService.Update(id, nil, nil, &newStatus)
+	if err != nil {
+		return c.Send("❌ *Failed to update monitor.*", SendSettings)
+	}
+
+	if newStatus {
+		return c.Send(fmt.Sprintf("▶️ *Monitor ID %d enabled.*", id), SendSettings)
+	}
+	return c.Send(fmt.Sprintf("⏸ *Monitor ID %d disabled.*", id), SendSettings)
 }

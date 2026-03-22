@@ -10,6 +10,7 @@ type MonitorRepository interface {
 	GetAll() ([]models.Monitor, error)
 	GetByID(id int) (*models.Monitor, error)
 	Create(monitor *models.Monitor) error
+	Update(monitor *models.Monitor) error
 	Delete(id int) error
 }
 

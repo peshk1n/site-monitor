@@ -18,3 +18,9 @@ type MonitorResponse struct {
 type MonitorListResponse struct {
 	Monitors []MonitorResponse `json:"monitors"`
 }
+
+type UpdateMonitorRequest struct {
+	Interval *int  `json:"interval"`
+	Timeout  *int  `json:"timeout"`
+	IsActive *bool `json:"is_active"`
+}

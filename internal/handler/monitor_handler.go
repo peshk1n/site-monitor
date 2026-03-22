@@ -127,3 +127,32 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
+
+// PATCH /monitors/{id}
+func (h *MonitorHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid monitor ID", http.StatusBadRequest)
+		return
+	}
+
+	defer r.Body.Close()
+
+	var req dto.UpdateMonitorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	monitor, err := h.monitorService.Update(id, req.Interval, req.Timeout, req.IsActive)
+	if errors.Is(err, service.ErrMonitorNotFound) {
+		http.Error(w, "Monitor not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to update monitor", http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, toMonitorResponse(*monitor))
+}

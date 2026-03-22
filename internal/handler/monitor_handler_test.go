@@ -18,6 +18,7 @@ type mockMonitorService struct {
 	GetAllFn  func() ([]models.Monitor, error)
 	GetByIDFn func(id int) (*models.Monitor, error)
 	CreateFn  func(url string, interval, timeout int) (*models.Monitor, error)
+	UpdateFn  func(id int, interval, timeout *int, isActive *bool) (*models.Monitor, error)
 	DeleteFn  func(id int) error
 }
 
@@ -30,6 +31,9 @@ func (m *mockMonitorService) GetByID(id int) (*models.Monitor, error) {
 func (m *mockMonitorService) Create(url string, interval, timeout int) (*models.Monitor, error) {
 	return m.CreateFn(url, interval, timeout)
 }
+func (m *mockMonitorService) Update(id int, interval, timeout *int, isActive *bool) (*models.Monitor, error) {
+	return m.UpdateFn(id, interval, timeout, isActive)
+}
 func (m *mockMonitorService) Delete(id int) error {
 	return m.DeleteFn(id)
 }
@@ -39,6 +43,7 @@ func newTestRouter(h *handler.MonitorHandler) *chi.Mux {
 	r.Get("/monitors", h.GetAll)
 	r.Post("/monitors", h.Create)
 	r.Get("/monitors/{id}", h.GetByID)
+	r.Patch("/monitors/{id}", h.Update)
 	r.Delete("/monitors/{id}", h.Delete)
 	return r
 }
@@ -198,6 +203,83 @@ func TestMonitorHandler_Create_InvalidJSON(t *testing.T) {
 	r := newTestRouter(h)
 
 	req := httptest.NewRequest(http.MethodPost, "/monitors", strings.NewReader("not json"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+// --- Тесты Update ---
+
+func TestMonitorHandler_Update_Success(t *testing.T) {
+	mock := &mockMonitorService{
+		UpdateFn: func(id int, interval, timeout *int, isActive *bool) (*models.Monitor, error) {
+			return &models.Monitor{ID: id, Interval: 120}, nil
+		},
+	}
+
+	h := handler.NewMonitorHandler(mock)
+	r := newTestRouter(h)
+
+	body := `{"interval": 120}`
+	req := httptest.NewRequest(http.MethodPatch, "/monitors/1", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestMonitorHandler_Update_NotFound(t *testing.T) {
+	mock := &mockMonitorService{
+		UpdateFn: func(id int, interval, timeout *int, isActive *bool) (*models.Monitor, error) {
+			return nil, service.ErrMonitorNotFound
+		},
+	}
+
+	h := handler.NewMonitorHandler(mock)
+	r := newTestRouter(h)
+
+	body := `{"interval": 120}`
+	req := httptest.NewRequest(http.MethodPatch, "/monitors/999", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", w.Code)
+	}
+}
+
+func TestMonitorHandler_Update_InvalidID(t *testing.T) {
+	mock := &mockMonitorService{}
+
+	h := handler.NewMonitorHandler(mock)
+	r := newTestRouter(h)
+
+	body := `{"interval": 120}`
+	req := httptest.NewRequest(http.MethodPatch, "/monitors/abc", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestMonitorHandler_Update_InvalidJSON(t *testing.T) {
+	mock := &mockMonitorService{}
+
+	h := handler.NewMonitorHandler(mock)
+	r := newTestRouter(h)
+
+	req := httptest.NewRequest(http.MethodPatch, "/monitors/1", strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

@@ -13,6 +13,7 @@ type mockMonitorRepository struct {
 	GetAllFn  func() ([]models.Monitor, error)
 	GetByIDFn func(id int) (*models.Monitor, error)
 	CreateFn  func(monitor *models.Monitor) error
+	UpdateFn  func(monitor *models.Monitor) error
 	DeleteFn  func(id int) error
 }
 
@@ -24,6 +25,9 @@ func (m *mockMonitorRepository) GetByID(id int) (*models.Monitor, error) {
 }
 func (m *mockMonitorRepository) Create(monitor *models.Monitor) error {
 	return m.CreateFn(monitor)
+}
+func (m *mockMonitorRepository) Update(monitor *models.Monitor) error {
+	return m.UpdateFn(monitor)
 }
 func (m *mockMonitorRepository) Delete(id int) error {
 	return m.DeleteFn(id)
@@ -197,5 +201,109 @@ func TestMonitorService_GetAll_ReturnsMonitors(t *testing.T) {
 	}
 	if len(monitors) != 2 {
 		t.Errorf("expected 2 monitors, got %d", len(monitors))
+	}
+}
+
+// --- Тесты Update ---
+
+func TestMonitorService_Update_Success(t *testing.T) {
+	interval := 120
+	mock := &mockMonitorRepository{
+		GetByIDFn: func(id int) (*models.Monitor, error) {
+			return &models.Monitor{
+				ID:       id,
+				URL:      "https://google.com",
+				Interval: 60,
+				Timeout:  10,
+				IsActive: true,
+			}, nil
+		},
+		UpdateFn: func(monitor *models.Monitor) error {
+			return nil
+		},
+	}
+
+	svc := service.NewMonitorService(mock)
+	monitor, err := svc.Update(1, &interval, nil, nil)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if monitor.Interval != 120 {
+		t.Errorf("expected interval 120, got %d", monitor.Interval)
+	}
+}
+
+func TestMonitorService_Update_NotFound(t *testing.T) {
+	interval := 120
+	mock := &mockMonitorRepository{
+		GetByIDFn: func(id int) (*models.Monitor, error) {
+			return nil, sql.ErrNoRows
+		},
+	}
+
+	svc := service.NewMonitorService(mock)
+	_, err := svc.Update(999, &interval, nil, nil)
+
+	if !errors.Is(err, service.ErrMonitorNotFound) {
+		t.Errorf("expected ErrMonitorNotFound, got %v", err)
+	}
+}
+
+func TestMonitorService_Update_TogglePause(t *testing.T) {
+	isActive := false
+	mock := &mockMonitorRepository{
+		GetByIDFn: func(id int) (*models.Monitor, error) {
+			return &models.Monitor{
+				ID:       id,
+				IsActive: true,
+			}, nil
+		},
+		UpdateFn: func(monitor *models.Monitor) error {
+			return nil
+		},
+	}
+
+	svc := service.NewMonitorService(mock)
+	monitor, err := svc.Update(1, nil, nil, &isActive)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if monitor.IsActive {
+		t.Error("expected monitor to be inactive")
+	}
+}
+
+func TestMonitorService_Update_OnlyPassedFieldsChanged(t *testing.T) {
+	interval := 120
+	mock := &mockMonitorRepository{
+		GetByIDFn: func(id int) (*models.Monitor, error) {
+			return &models.Monitor{
+				ID:       id,
+				Interval: 60,
+				Timeout:  10,
+				IsActive: true,
+			}, nil
+		},
+		UpdateFn: func(monitor *models.Monitor) error {
+			return nil
+		},
+	}
+
+	svc := service.NewMonitorService(mock)
+	monitor, err := svc.Update(1, &interval, nil, nil)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if monitor.Interval != 120 {
+		t.Errorf("expected interval 120, got %d", monitor.Interval)
+	}
+	if monitor.Timeout != 10 {
+		t.Errorf("expected timeout 10, got %d", monitor.Timeout)
+	}
+	if !monitor.IsActive {
+		t.Error("expected monitor to remain active")
 	}
 }

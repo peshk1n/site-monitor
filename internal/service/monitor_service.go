@@ -68,3 +68,29 @@ func (s *MonitorService) Delete(id int) error {
 	}
 	return nil
 }
+
+func (s *MonitorService) Update(id int, interval, timeout *int, isActive *bool) (*models.Monitor, error) {
+	monitor, err := s.monitorRepo.GetByID(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrMonitorNotFound
+		}
+		return nil, err
+	}
+
+	if interval != nil {
+		monitor.Interval = *interval
+	}
+	if timeout != nil {
+		monitor.Timeout = *timeout
+	}
+	if isActive != nil {
+		monitor.IsActive = *isActive
+	}
+
+	if err := s.monitorRepo.Update(monitor); err != nil {
+		return nil, err
+	}
+
+	return monitor, nil
+}

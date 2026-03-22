@@ -19,6 +19,7 @@ func NewRouter(
 		r.Post("/", monitorHandler.Create)
 		r.Get("/{id}", monitorHandler.GetByID)
 		r.Delete("/{id}", monitorHandler.Delete)
+		r.Patch("/{id}", monitorHandler.Update)
 
 		r.Get("/{id}/checks", checkHandler.GetByMonitorID)
 		r.Get("/{id}/checks/last", checkHandler.GetLastByMonitorID)

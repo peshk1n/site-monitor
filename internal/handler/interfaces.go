@@ -9,6 +9,7 @@ type MonitorService interface {
 	GetAll() ([]models.Monitor, error)
 	GetByID(id int) (*models.Monitor, error)
 	Create(url string, interval, timeout int) (*models.Monitor, error)
+	Update(id int, interval, timeout *int, isActive *bool) (*models.Monitor, error)
 	Delete(id int) error
 }
 
