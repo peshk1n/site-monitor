@@ -10,6 +10,7 @@ import uuid
 
 MIGRATIONS = Path(__file__).resolve().parents[1]
 RUNNER = MIGRATIONS / 'migrate.py'
+LATEST_VERSION = max(int(path.name.split('_')[0]) for path in (MIGRATIONS / 'up').glob('*.up.sql'))
 sys.path.insert(0, str(MIGRATIONS))
 from migrate import connection_environment
 
@@ -106,7 +107,7 @@ class MigrationTests(unittest.TestCase):
         original_shape = self.legacy_shape()
         self.migrate()
         self.migrate()
-        self.assertEqual(self.sql('SELECT count(*) FROM schema_migrations'), '10')
+        self.assertEqual(self.sql('SELECT count(*) FROM schema_migrations'), str(LATEST_VERSION))
         self.migrate('status')
         self.migrate('down', 2)
         self.assertEqual(self.legacy_shape(), original_shape)
@@ -129,7 +130,7 @@ class MigrationTests(unittest.TestCase):
             'SELECT origin, outcome, status_code IS NULL, config_version IS NULL, '
             "started_at IS NULL, observed_at = '2026-01-02 10:00:00+00'::TIMESTAMPTZ "
             'FROM check_results WHERE id = 1'), 'legacy|failure|t|t|t|t')
-        self.assertEqual(self.sql('SELECT health_status, consecutive_failures FROM monitor_runtime'), 'unknown|0')
+        self.assertEqual(self.sql('SELECT health_status, candidate_count FROM monitor_runtime'), 'unknown|0')
         self.assertEqual(self.sql('SELECT count(*) FROM incidents'), '0')
         self.sql('DELETE FROM monitors WHERE id = 1', expected_error='23503')
         self.migrate('down', 2)
@@ -152,6 +153,90 @@ class MigrationTests(unittest.TestCase):
         ]:
             with self.subTest(assignment=assignment):
                 self.sql(f'UPDATE monitors SET {assignment} WHERE id = {self.monitor}', expected_error='23514')
+
+    def test_telegram_identity_is_unique_and_supports_large_ids(self):
+        self.fixtures()
+        telegram_id = 2 ** 40
+        self.sql(f'UPDATE users SET telegram_user_id = {telegram_id} WHERE id = {self.user}')
+        self.sql("UPDATE users SET display_name = 'Renamed' WHERE id = " + str(self.user))
+        self.assertEqual(self.sql(f'SELECT telegram_user_id FROM users WHERE id = {self.user}'), str(telegram_id))
+        self.sql("INSERT INTO users (login, display_name, telegram_user_id) "
+                 f"VALUES ('duplicate', 'Duplicate', {telegram_id})", expected_error='23505')
+        for invalid in (0, -1):
+            with self.subTest(telegram_id=invalid):
+                self.sql(f'UPDATE users SET telegram_user_id = {invalid} WHERE id = {self.user}',
+                         expected_error='23514')
+        self.sql(f'UPDATE users SET archived_at = CURRENT_TIMESTAMP WHERE id = {self.user}')
+        self.sql("INSERT INTO users (login, display_name, telegram_user_id) "
+                 f"VALUES ('replacement', 'Replacement', {telegram_id})", expected_error='23505')
+        self.sql("INSERT INTO users (login, display_name) VALUES ('legacy-a', 'A'), ('legacy-b', 'B')")
+        self.assertEqual(self.sql('SELECT count(*) FROM users WHERE telegram_user_id IS NULL'), '2')
+
+    def test_state_candidate_requires_a_complete_observed_series(self):
+        self.fixtures()
+        self.sql('INSERT INTO monitor_runtime (monitor_id, state_config_version) '
+                 f'VALUES ({self.monitor}, 1)')
+        self.assertEqual(self.sql('SELECT candidate_status IS NULL, candidate_count, '
+                                 'candidate_since IS NULL, evaluation_started_at IS NOT NULL '
+                                 'FROM monitor_runtime'), 't|0|t|t')
+        self.sql("UPDATE monitor_runtime SET candidate_status = 'down', candidate_count = 1, "
+                 'candidate_since = CURRENT_TIMESTAMP', expected_error='23514')
+        self.sql("UPDATE monitor_runtime SET health_status = 'up', last_observed_at = CURRENT_TIMESTAMP, "
+                 "fresh_until = CURRENT_TIMESTAMP + INTERVAL '130 seconds', candidate_status = 'down', "
+                 'candidate_count = 2, candidate_since = CURRENT_TIMESTAMP')
+        for assignment in [
+            "candidate_status = 'unknown'", "candidate_status = 'up'", 'candidate_status = NULL',
+            'candidate_count = 0', 'candidate_count = -1', 'candidate_count = 101',
+            'candidate_count = NULL', 'candidate_since = NULL',
+            "candidate_since = last_observed_at + INTERVAL '1 second'",
+            'last_observed_at = NULL, fresh_until = NULL', "health_status = 'down'",
+        ]:
+            with self.subTest(assignment=assignment):
+                expected = '23502' if assignment == 'candidate_count = NULL' else '23514'
+                self.sql(f'UPDATE monitor_runtime SET {assignment}', expected_error=expected)
+        self.sql("UPDATE monitor_runtime SET health_status = 'down', candidate_status = NULL, "
+                 'candidate_count = 0, candidate_since = NULL')
+        self.sql("UPDATE monitor_runtime SET candidate_status = 'degraded', candidate_count = 1, "
+                 'candidate_since = last_observed_at')
+        self.assertEqual(self.sql('SELECT health_status, candidate_status, candidate_count FROM monitor_runtime'),
+                         'down|degraded|1')
+
+    def test_mini_app_upgrade_and_rollback_preserve_confirmed_state(self):
+        self.migrate(target=10)
+        project = int(self.sql("SELECT id FROM projects WHERE slug = 'default'"))
+        monitor = self.make_monitor(project, 'existing')
+        result = self.make_result(monitor)
+        incident = self.make_incident(monitor, project)
+        self.make_event(incident, monitor, project)
+        self.sql("INSERT INTO users (login, display_name) VALUES ('existing', 'Existing')")
+        self.sql('INSERT INTO monitor_runtime (monitor_id, state_config_version, health_status, '
+                 'consecutive_successes, last_check_id, last_observed_at, fresh_until, active_run_id, '
+                 'lease_owner, lease_expires_at, running_config_version) '
+                 f"VALUES ({monitor}, 1, 'down', 1, {result}, CURRENT_TIMESTAMP, "
+                 "CURRENT_TIMESTAMP + INTERVAL '130 seconds', gen_random_uuid(), 'worker', "
+                 "CURRENT_TIMESTAMP + INTERVAL '30 seconds', 1)")
+        state_query = ('SELECT monitor_id, health_status, state_config_version, last_check_id, last_observed_at, '
+                       'fresh_until, active_run_id, lease_owner, lease_expires_at, running_config_version, '
+                       'state_changed_at FROM monitor_runtime')
+        original_state = self.sql(state_query)
+        self.migrate()
+        self.assertEqual(self.sql(state_query), original_state)
+        self.assertEqual(self.sql('SELECT candidate_status IS NULL, candidate_count FROM monitor_runtime'), 't|0')
+        self.assertEqual(self.sql('SELECT telegram_user_id IS NULL FROM users'), 't')
+        self.sql('UPDATE users SET telegram_user_id = 1099511627776')
+        self.sql("UPDATE monitor_runtime SET candidate_status = 'up', candidate_count = 1, "
+                 'candidate_since = last_observed_at')
+        self.migrate('down', 10)
+        self.assertEqual(self.sql(state_query), original_state)
+        self.assertEqual(self.sql('SELECT consecutive_failures, consecutive_successes FROM monitor_runtime'), '0|0')
+        self.assertEqual(self.sql('SELECT login FROM users'), 'existing')
+        self.assertEqual(self.sql('SELECT count(*) FROM incidents WHERE resolved_at IS NULL'), '1')
+        self.assertEqual(self.sql('SELECT count(*) FROM monitor_events'), '1')
+        self.assertEqual(self.sql('SELECT count(*) FROM check_results'), '1')
+        self.migrate()
+        self.assertEqual(self.sql(state_query), original_state)
+        self.assertEqual(self.sql('SELECT candidate_status IS NULL, candidate_count FROM monitor_runtime'), 't|0')
+        self.assertEqual(self.sql('SELECT telegram_user_id IS NULL FROM users'), 't')
 
     def test_access_requests_have_independent_lifecycles(self):
         self.fixtures()
@@ -292,10 +377,10 @@ COMMIT;'''
     def test_initialization_scripts_can_be_baselined(self):
         for path in sorted((MIGRATIONS / 'up').glob('*.up.sql')):
             self.sql(path.read_text())
-        self.migrate('baseline', 10)
+        self.migrate('baseline', LATEST_VERSION)
         self.migrate()
         self.assertEqual(self.sql('SELECT count(*) FROM projects'), '1')
-        self.assertEqual(self.sql('SELECT count(*) FROM schema_migrations'), '10')
+        self.assertEqual(self.sql('SELECT count(*) FROM schema_migrations'), str(LATEST_VERSION))
 
     def test_checksums_and_failed_migration_are_transactional(self):
         self.migrate()
@@ -307,11 +392,11 @@ COMMIT;'''
             path.write_text(path.read_text() + '\n')
             self.migrate(directory=directory, error='checksums')
             shutil.copyfile(MIGRATIONS / 'up/003_projects_and_access.up.sql', path)
-            (directory / 'up/011_broken.up.sql').write_text('CREATE TABLE failed_step (id INTEGER); SELECT 1 / 0;')
-            (directory / 'down/011_broken.down.sql').write_text('DROP TABLE failed_step;')
+            (directory / f'up/{LATEST_VERSION + 1:03d}_broken.up.sql').write_text('CREATE TABLE failed_step (id INTEGER); SELECT 1 / 0;')
+            (directory / f'down/{LATEST_VERSION + 1:03d}_broken.down.sql').write_text('DROP TABLE failed_step;')
             self.migrate(directory=directory, error='division by zero')
             self.assertEqual(self.sql("SELECT to_regclass('failed_step') IS NULL"), 't')
-            self.assertEqual(self.sql('SELECT max(version) FROM schema_migrations'), '10')
+            self.assertEqual(self.sql('SELECT max(version) FROM schema_migrations'), str(LATEST_VERSION))
             self.assertEqual(self.sql('SELECT count(*) FROM projects'), '1')
 
 

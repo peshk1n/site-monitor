@@ -2,82 +2,80 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	tele "gopkg.in/telebot.v3"
-
-	"github.com/peshk1n/site-monitor/internal/bot"
+	"github.com/peshk1n/site-monitor/internal/auth"
 	"github.com/peshk1n/site-monitor/internal/config"
 	"github.com/peshk1n/site-monitor/internal/db"
 	"github.com/peshk1n/site-monitor/internal/handler"
 	"github.com/peshk1n/site-monitor/internal/logger"
+	"github.com/peshk1n/site-monitor/internal/probe"
 	"github.com/peshk1n/site-monitor/internal/repository"
 	"github.com/peshk1n/site-monitor/internal/router"
 	"github.com/peshk1n/site-monitor/internal/scheduler"
 	"github.com/peshk1n/site-monitor/internal/service"
 )
 
-func main() {
-	cfg := config.Load()
+func run() error {
 	log := logger.New()
-
-	database := db.Connect(cfg.DBUrl, log)
-
-	monitorRepo := repository.NewMonitorRepository(database)
-	checkRepo := repository.NewCheckRepository(database)
-
-	telegramBot, err := tele.NewBot(tele.Settings{
-		Token:  cfg.TelegramToken,
-		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
-	})
+	cfg, err := config.Load()
 	if err != nil {
-		log.Error("Failed to create telegram bot", "error", err)
+		return err
 	}
-
-	notifier := bot.NewTelegramNotifier(telegramBot, cfg.TelegramChatID)
-	monitorService := service.NewMonitorService(monitorRepo)
-	checkService := service.NewCheckService(checkRepo, monitorRepo, notifier, log)
-	tgBot := bot.NewBot(telegramBot, cfg.TelegramChatID, monitorService, checkService)
-	tgBot.Start()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	s := scheduler.NewScheduler(monitorService, checkService, log)
-	s.Start(ctx)
-
-	monitorHandler := handler.NewMonitorHandler(monitorService)
-	checkHandler := handler.NewCheckHandler(checkService)
-	r := router.NewRouter(monitorHandler, checkHandler)
-
-	srv := &http.Server{
-		Addr:    ":" + cfg.ServerPort,
-		Handler: r,
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	database, err := db.Connect(connectCtx, cfg.DBURL)
+	cancel()
+	if err != nil {
+		return err
 	}
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-quit
-		log.Info("Shutting down...")
-		cancel()
-		tgBot.Stop()
-
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer shutdownCancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Error("HTTP server shutdown error", "error", err)
-		}
-
-		database.Close()
-	}()
-
-	log.Info("Server started on port", "port", cfg.ServerPort)
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		log.Error("HTTP server error", "error", err)
+	defer database.Close()
+	app := service.New(repository.New(database))
+	authentication := auth.NewTelegram(cfg.TelegramToken, app, cfg.AuthMaxAge)
+	h := handler.New(app, authentication, log)
+	r := router.New(h, database.PingContext)
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+	checker := probe.New()
+	defer checker.Close()
+	worker := scheduler.New(app, checker, log, cfg.Workers, fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()))
+	workersDone := make(chan struct{})
+	go func() { worker.Run(workerCtx); close(workersDone) }()
+	srv := &http.Server{Addr: ":" + cfg.ServerPort, Handler: r, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	serverError := make(chan error, 1)
+	go func() { serverError <- srv.ListenAndServe() }()
+	log.Info("server started", "port", cfg.ServerPort, "workers", cfg.Workers)
+	select {
+	case <-ctx.Done():
+	case err = <-serverError:
+	}
+	stopWorkers()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if shutdownErr := srv.Shutdown(shutdownCtx); shutdownErr != nil {
+		srv.Close()
+		log.Error("HTTP shutdown failed")
+	}
+	select {
+	case <-workersDone:
+	case <-shutdownCtx.Done():
+		return errors.New("workers did not stop before shutdown deadline")
+	}
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+func main() {
+	if err := run(); err != nil {
+		logger.New().Error("server stopped", "error", err)
+		os.Exit(1)
 	}
 }
