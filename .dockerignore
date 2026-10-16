@@ -1,4 +1,11 @@
-.env
 .git
 .gitignore
 *.md
+.env
+.env.*
+docs
+.agents
+.codex
+*.test
+*.out
+__pycache__

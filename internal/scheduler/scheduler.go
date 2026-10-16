@@ -2,80 +2,64 @@ package scheduler
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/peshk1n/site-monitor/internal/models"
-	"github.com/peshk1n/site-monitor/internal/service"
 )
 
+type Jobs interface {
+	Claim(context.Context, string) (*models.Job, error)
+	Complete(context.Context, models.Job, models.Result) error
+}
+type Probe interface {
+	Run(context.Context, models.Job) models.Result
+}
 type Scheduler struct {
-	monitorService *service.MonitorService
-	checkService   *service.CheckService
-	log            *slog.Logger
+	jobs    Jobs
+	probe   Probe
+	log     *slog.Logger
+	workers int
+	owner   string
 }
 
-func NewScheduler(
-	monitorService *service.MonitorService,
-	checkService *service.CheckService,
-	log *slog.Logger,
-) *Scheduler {
-	return &Scheduler{
-		monitorService: monitorService,
-		checkService:   checkService,
-		log:            log,
-	}
+func New(jobs Jobs, probe Probe, log *slog.Logger, workers int, owner string) *Scheduler {
+	return &Scheduler{jobs: jobs, probe: probe, log: log, workers: workers, owner: owner}
 }
-
-func (s *Scheduler) Start(ctx context.Context) {
-	s.log.Info("Scheduler started")
-
-	go func() {
-		s.runChecks(ctx)
-
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				s.runChecks(ctx)
-			case <-ctx.Done():
-				s.log.Info("Scheduler stopped")
-				return
-			}
-		}
-	}()
-}
-
-func (s *Scheduler) runChecks(ctx context.Context) {
-	monitors, err := s.monitorService.GetAll()
-	if err != nil {
-		s.log.Error("Failed to load monitors:", "error", err)
-		return
-	}
-
-	if len(monitors) == 0 {
-		return
-	}
-
+func (s *Scheduler) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-	for _, monitor := range monitors {
-		if !monitor.IsActive {
+	for i := 0; i < s.workers; i++ {
+		wg.Add(1)
+		go func(index int) { defer wg.Done(); s.worker(ctx, fmt.Sprintf("%s/%d", s.owner, index)) }(i)
+	}
+	wg.Wait()
+}
+func (s *Scheduler) worker(ctx context.Context, owner string) {
+	for ctx.Err() == nil {
+		claimCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		job, err := s.jobs.Claim(claimCtx, owner)
+		cancel()
+		if err != nil {
+			s.log.Error("claim failed", "error", err)
+		}
+		if err != nil || job == nil {
+			timer := time.NewTimer(time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			continue
 		}
-
-		wg.Add(1)
-		go func(m models.Monitor) {
-			defer wg.Done()
-			if err := s.checkService.RunCheck(ctx, m); err != nil {
-				log.Println("Failed to check monitor:", "url", m.URL, "error", err)
-			}
-		}(monitor)
+		result := s.probe.Run(ctx, *job)
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		err = s.jobs.Complete(finishCtx, *job, result)
+		cancel()
+		if err != nil {
+			s.log.Error("result persistence failed", "monitor_id", job.Monitor.ID, "error", err)
+		}
 	}
-
-	wg.Wait()
-	s.log.Info("All checks completed")
 }

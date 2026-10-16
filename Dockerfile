@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25.5-alpine AS builder
 
 WORKDIR /app
 
@@ -7,13 +7,17 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o server ./cmd/server/main.go
+RUN CGO_ENABLED=0 go build -o server ./cmd/server
 
 FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates && adduser -D app
 
 WORKDIR /app
 
 COPY --from=builder /app/server .
+
+USER app
 
 EXPOSE 8080
 
